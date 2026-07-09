@@ -49,6 +49,7 @@ namespace FloatingClock
             { "opacity",      new[] { "不透明度", "Opacity" } },
             { "scale_x",      new[] { "宽度", "Width" } },
             { "scale_y",      new[] { "高度", "Height" } },
+            { "linkscale",    new[] { "等比联动（宽高一起缩放）🔗", "Link width & height 🔗" } },
             { "backshade",    new[] { "底色", "Shade" } },
             { "skin_label",   new[] { "主题", "Theme" } },
             // 开关提示（tooltip）
@@ -163,8 +164,7 @@ namespace FloatingClock
                 SkinRow(),
                 ToggleRow("disableglass", null, MainWindow.DisableGlass, v => MainWindow.Current.SetDisableGlass(v)),
                 SliderRow("opacity", 0.2, 1.0, MainWindow.ClockOpacity, 0.05, v => MainWindow.Current.SetOpacity(v)),
-                SliderRow("scale_x", 0.5, 3.0, MainWindow.ClockScaleX, 0.05, v => MainWindow.Current.SetScaleX(v)),
-                SliderRow("scale_y", 0.5, 3.0, MainWindow.ClockScaleY, 0.05, v => MainWindow.Current.SetScaleY(v)),
+                ScaleRows(),
                 SliderRow("backshade", 0.0, 1.0, MainWindow.ClockBackShade / 255.0, 0.02, v => MainWindow.Current.SetBackShade((int)Math.Round(v * 255)))));
 
             // 区域与语言
@@ -296,7 +296,7 @@ namespace FloatingClock
             return grid;
         }
 
-        private FrameworkElement SliderRow(string labelKey, double min, double max, double val, double tick, Action<double> onChange)
+        private FrameworkElement SliderRow(string labelKey, double min, double max, double val, double tick, Action<double> onChange, Action<Slider> onCreated = null)
         {
             var grid = new Grid { Height = 34 };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
@@ -343,7 +343,42 @@ namespace FloatingClock
             grid.Children.Add(lbl);
             grid.Children.Add(slider);
             grid.Children.Add(pct);
+            if (onCreated != null) onCreated(slider);
             return grid;
+        }
+
+        /// <summary>宽 / 高缩放两行 + 等比联动开关（🔗）</summary>
+        private FrameworkElement ScaleRows()
+        {
+            var panel = new StackPanel();
+            Slider sx = null, sy = null;
+            var syncing = new bool[] { false };
+
+            panel.Children.Add(ToggleRow("linkscale", null, MainWindow.LinkScale, on =>
+            {
+                MainWindow.Current.SetLinkScale(on);
+                if (on && sx != null && sy != null && !syncing[0])
+                {
+                    syncing[0] = true; sy.Value = sx.Value; syncing[0] = false;
+                    MainWindow.Current.SetScaleY(sx.Value);
+                }
+            }));
+
+            panel.Children.Add(SliderRow("scale_x", 0.5, 3.0, MainWindow.ClockScaleX, 0.05,
+                v =>
+                {
+                    MainWindow.Current.SetScaleX(v);
+                    if (MainWindow.LinkScale && sy != null && !syncing[0]) { syncing[0] = true; sy.Value = v; syncing[0] = false; }
+                }, s => sx = s));
+
+            panel.Children.Add(SliderRow("scale_y", 0.5, 3.0, MainWindow.ClockScaleY, 0.05,
+                v =>
+                {
+                    MainWindow.Current.SetScaleY(v);
+                    if (MainWindow.LinkScale && sx != null && !syncing[0]) { syncing[0] = true; sx.Value = v; syncing[0] = false; }
+                }, s => sy = s));
+
+            return panel;
         }
 
         private FrameworkElement TimeZoneRow()

@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using Application = System.Windows.Application;
 using MouseEventArgs = System.Windows.Forms.MouseEventArgs;
+using Cursors = System.Windows.Input.Cursors;
 
 namespace FloatingClock
 {
@@ -38,11 +39,20 @@ namespace FloatingClock
         public static int ClockBackShade = 17;    // 背景底色明暗 0(黑) ~ 255(白)
         public static int TargetScreen = -1;      // -1=跟随鼠标所在屏；0..N=指定屏幕
         public static string ClockSkin = "默认（玻璃白）";  // 当前皮肤名
+        public static bool LinkScale = true;      // 宽高等比联动
 
         private NotifyIcon notifyIcon;
         private DispatcherTimer refreshDispatcher;
         private DispatcherTimer topmostTimer;
         private OptionsWindow optionsWindow;
+
+        // 边缘拖动缩放状态
+        private bool _resizing;
+        private int _resizeStartX, _resizeStartY;
+        private double _resizeStartSX, _resizeStartSY;
+        private bool _resizeAxisX, _resizeAxisY;
+        private const double ResizeEdge = 18;   // 边缘热区(px)
+        private const double SnapDist = 20;     // 弱吸附阈值(px)
 
         /// <summary>
         ///     写入设置到注册表
@@ -170,6 +180,12 @@ namespace FloatingClock
             SaveReg(nameof(ClockScaleY), v.ToString(System.Globalization.CultureInfo.InvariantCulture));
             ApplyScale();
             if (WindowIsVisible) SetPositionOnCurrentDisplay();
+        }
+
+        internal void SetLinkScale(bool v)
+        {
+            LinkScale = v;
+            SaveReg(nameof(LinkScale), v);
         }
 
         internal void SetTimeZone(string id)
@@ -419,15 +435,115 @@ namespace FloatingClock
         /// <summary>
         ///     鼠标左键拖动窗口（锁定时禁止）
         /// </summary>
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool GetCursorPos(out POINTAPI pt);
+        private struct POINTAPI { public int X; public int Y; }
+
+        /// <summary>
+        ///     鼠标左键按下：靠近右 / 下 / 右下角边缘 → 拖动缩放；否则拖动移动（松手弱吸附边缘）。
+        /// </summary>
         private void Window_DragMove(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (Locked) return;
+            var pos = e.GetPosition(this);
+            bool nearRight = pos.X >= ActualWidth - ResizeEdge;
+            bool nearBottom = pos.Y >= ActualHeight - ResizeEdge;
+            if (nearRight || nearBottom)
+            {
+                BeginEdgeResize(nearRight, nearBottom);
+                return;
+            }
             try
             {
                 DragMove();
+                SnapToEdges();
                 SaveCustomPosition();
             }
             catch { }
+        }
+
+        /// <summary>悬停时靠近边缘显示缩放光标，提示可拖动缩放</summary>
+        private void Window_HoverCursor(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (Locked || _resizing) { Cursor = Cursors.Arrow; return; }
+            var pos = e.GetPosition(this);
+            bool r = pos.X >= ActualWidth - ResizeEdge;
+            bool b = pos.Y >= ActualHeight - ResizeEdge;
+            Cursor = (r && b) ? Cursors.SizeNWSE : r ? Cursors.SizeWE : b ? Cursors.SizeNS : Cursors.Arrow;
+        }
+
+        private void BeginEdgeResize(bool axisX, bool axisY)
+        {
+            _resizing = true;
+            _resizeAxisX = axisX;
+            _resizeAxisY = axisY;
+            POINTAPI p;
+            GetCursorPos(out p);
+            _resizeStartX = p.X;
+            _resizeStartY = p.Y;
+            _resizeStartSX = ClockScaleX;
+            _resizeStartSY = ClockScaleY;
+            CaptureMouse();
+            MouseMove += ResizeMove;
+            MouseLeftButtonUp += ResizeEnd;
+            Mouse.OverrideCursor = (axisX && axisY) ? Cursors.SizeNWSE : axisX ? Cursors.SizeWE : Cursors.SizeNS;
+        }
+
+        private void ResizeMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (!_resizing) return;
+            POINTAPI p;
+            GetCursorPos(out p);
+            double dx = p.X - _resizeStartX;
+            double dy = p.Y - _resizeStartY;
+            const double sens = 260.0;   // 拖 260px 约变 1.0 倍
+            double nx = _resizeStartSX, ny = _resizeStartSY;
+            if (_resizeAxisX) nx = Math.Max(0.5, Math.Min(3.0, _resizeStartSX + dx / sens));
+            if (_resizeAxisY) ny = Math.Max(0.5, Math.Min(3.0, _resizeStartSY + dy / sens));
+            if (LinkScale)
+            {
+                double v = _resizeAxisX ? nx : ny;   // 等比：用主导轴
+                nx = v; ny = v;
+            }
+            ClockScaleX = nx; ClockScaleY = ny;
+            ApplyScale();
+        }
+
+        private void ResizeEnd(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (!_resizing) return;
+            _resizing = false;
+            ReleaseMouseCapture();
+            MouseMove -= ResizeMove;
+            MouseLeftButtonUp -= ResizeEnd;
+            Mouse.OverrideCursor = null;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            SaveReg(nameof(ClockScaleX), ClockScaleX.ToString(inv));
+            SaveReg(nameof(ClockScaleY), ClockScaleY.ToString(inv));
+            RefreshOptionsWindow();   // 若设置窗口开着，刷新滑块显示
+        }
+
+        /// <summary>
+        ///     弱吸附：拖动松手后若窗口边缘靠近所在屏工作区边缘（阈值内），吸附贴齐。
+        /// </summary>
+        private void SnapToEdges()
+        {
+            var win = Application.Current.MainWindow;
+            double w = win.ActualWidth, h = win.ActualHeight;
+            if (w < 1 || h < 1) return;
+            double dpi = Screen.PrimaryScreen.Bounds.Height / SystemParameters.PrimaryScreenHeight;
+            var center = new System.Drawing.Point(
+                (int)((win.Left + w / 2) * dpi), (int)((win.Top + h / 2) * dpi));
+            var scr = Screen.FromPoint(center);
+            double waL = scr.WorkingArea.Left / dpi, waT = scr.WorkingArea.Top / dpi;
+            double waR = scr.WorkingArea.Right / dpi, waB = scr.WorkingArea.Bottom / dpi;
+
+            double left = win.Left, top = win.Top;
+            if (Math.Abs(left - waL) <= SnapDist) left = waL;
+            else if (Math.Abs((left + w) - waR) <= SnapDist) left = waR - w;
+            if (Math.Abs(top - waT) <= SnapDist) top = waT;
+            else if (Math.Abs((top + h) - waB) <= SnapDist) top = waB - h;
+            win.Left = left; win.Top = top;
         }
 
         /// <summary>
@@ -452,6 +568,7 @@ namespace FloatingClock
             InitializeComponent();
             Current = this;
             MouseLeftButtonDown += Window_DragMove;
+            MouseMove += Window_HoverCursor;
             SourceInitialized += (s, e) => ApplyClickThrough();
 
             RegistryKey registryKey = Registry.CurrentUser.CreateSubKey(@"SOFTWARE\BaalTech\FloatingClock");
@@ -473,6 +590,7 @@ namespace FloatingClock
             ClockBackShade = Convert.ToInt32(registryKey.GetValue(nameof(ClockBackShade), ClockBackShade));
             TargetScreen = Convert.ToInt32(registryKey.GetValue(nameof(TargetScreen), TargetScreen));
             ClockSkin = Convert.ToString(registryKey.GetValue(nameof(ClockSkin), ClockSkin));
+            LinkScale = Convert.ToBoolean(registryKey.GetValue(nameof(LinkScale), Convert.ToInt32(LinkScale)));
             registryKey.Close();
 
             Refresh();
