@@ -622,13 +622,20 @@ namespace FloatingClock
                     left = waX + waW - w - margin; top = waY + waH - h - margin; break;
                 case 4: // 居中
                     left = waX + (waW - w) / 2; top = waY + (waH - h) / 2; break;
-                case 5: // 自定义（手动拖动记忆）
+                case 5: // 自定义（手动拖动记忆）—— 绝对坐标，跨屏也能回到原位
                     if (!double.IsNaN(CustomLeft) && !double.IsNaN(CustomTop))
                     {
-                        left = Math.Max(waX, Math.Min(CustomLeft, waX + waW - w));
-                        top = Math.Max(waY, Math.Min(CustomTop, waY + waH - h));
+                        // 用整个虚拟桌面（所有屏幕合并）范围钳制，而不是鼠标所在的单块屏，
+                        // 否则开机鼠标在主屏时，保存在副屏的坐标会被拉回主屏。
+                        double vX = SystemParameters.VirtualScreenLeft;
+                        double vY = SystemParameters.VirtualScreenTop;
+                        double vW = SystemParameters.VirtualScreenWidth;
+                        double vH = SystemParameters.VirtualScreenHeight;
+                        Application.Current.MainWindow.Left = Math.Max(vX, Math.Min(CustomLeft, vX + vW - w));
+                        Application.Current.MainWindow.Top = Math.Max(vY, Math.Min(CustomTop, vY + vH - h));
+                        return;
                     }
-                    else { left = waX + margin; top = waY + waH - h - margin; }
+                    left = waX + margin; top = waY + waH - h - margin;
                     break;
                 default: // 0 左下
                     left = waX + margin; top = waY + waH - h - margin; break;
