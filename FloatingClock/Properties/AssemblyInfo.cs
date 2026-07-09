@@ -6,11 +6,11 @@ using System.Windows;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 
-[assembly: AssemblyTitle("Floating Clock")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("Floating Clock+")]
+[assembly: AssemblyDescription("悬浮时钟增强版")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("BaalTech")]
-[assembly: AssemblyProduct("Floating Clock")]
+[assembly: AssemblyProduct("Floating Clock+")]
 [assembly: AssemblyCopyright("Copyright © BaalTech 2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -52,5 +52,5 @@ using System.Windows;
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
 
-[assembly: AssemblyVersion("1.0.0.1")]
-[assembly: AssemblyFileVersion("1.0.0.1")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]

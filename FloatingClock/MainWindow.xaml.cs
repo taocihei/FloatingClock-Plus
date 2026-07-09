@@ -530,7 +530,6 @@ namespace FloatingClock
         {
             if (!WindowIsVisible)
             {
-                SetPositionOnCurrentDisplay();
                 Refresh();
                 InitializeAnimationIn();
                 WaitToFullMinuteAndRefresh();
@@ -766,16 +765,22 @@ namespace FloatingClock
         /// </summary>
         private void InitializeAnimationIn()
         {
-            Application.Current.MainWindow.Activate();
-            Application.Current.MainWindow.Opacity = 0;
-            var dispatcherTimer = new DispatcherTimer();
-            dispatcherTimer.Tick += OpacityFadeIn;
-            dispatcherTimer.Interval = new TimeSpan(0, 0, 0, 0, 5);
-            Application.Current.MainWindow.Visibility = Visibility.Visible;
-
+            var win = Application.Current.MainWindow;
+            win.Opacity = 0;                       // 先全透明
+            win.Visibility = Visibility.Visible;
             WindowIsVisible = true;
-            dispatcherTimer.Start();
+            win.Activate();
             if (AlwaysOnTop) BringToTop();
+
+            // 等窗口完成首次布局、拿到真实 ActualWidth/Height 后再定位并淡入，
+            // 避免在尺寸还是 0（用兜底 420x180）时定位，导致每次启动错位。
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                SetPositionOnCurrentDisplay();
+                var fade = new DispatcherTimer { Interval = new TimeSpan(0, 0, 0, 0, 5) };
+                fade.Tick += OpacityFadeIn;
+                fade.Start();
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         /// <summary>
